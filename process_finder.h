@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,8 @@ struct ProcessInfo {
 
 // Collect all regular files under `path` (or just the file itself).
 std::vector<std::wstring> collect_files(const std::string& path);
+std::vector<std::wstring> collect_files(const std::string& path,
+                                        std::function<void(size_t)> progress);
 
 // Find every process that holds a lock on any of the given files.
 std::vector<ProcessInfo> find_locking_processes(const std::vector<std::wstring>& files);

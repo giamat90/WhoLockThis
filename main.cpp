@@ -8,9 +8,13 @@
 
 #include <windows.h>
 
+#include <atomic>
+#include <cfloat>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 // ── dark theme ───────────────────────────────────────────────────────────────
@@ -65,7 +69,7 @@ static void apply_theme()
 // ── confirm-kill popup ───────────────────────────────────────────────────────
 
 struct KillRequest {
-    bool   active   = false;
+    bool   pending  = false;   // set true to open the popup on next frame
     bool   killAll  = false;
     uint32_t pid    = 0;
     std::string name;
@@ -73,16 +77,14 @@ struct KillRequest {
 
 static KillRequest g_killReq;
 
-static void open_kill_popup(uint32_t pid, const std::string& name)
+static void request_kill(uint32_t pid, const std::string& name)
 {
     g_killReq = {true, false, pid, name};
-    ImGui::OpenPopup("Confirm Kill");
 }
 
-static void open_kill_all_popup()
+static void request_kill_all()
 {
     g_killReq = {true, true, 0, ""};
-    ImGui::OpenPopup("Confirm Kill");
 }
 
 // ── main ─────────────────────────────────────────────────────────────────────
@@ -139,32 +141,83 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int)
     bool         autoScanned = false;
     ImVec4       statusColor = ImVec4(0.5f, 0.5f, 0.55f, 1.0f);
 
-    // Lambda: run the scan
+    // --- Scan threading state ---
+    std::atomic<bool>   scanning{false};
+    std::atomic<size_t> filesCollected{0};
+    std::atomic<int>    scanPhase{0};  // 0=idle, 1=collecting files, 2=analyzing locks
+    std::mutex          resultMutex;
+    std::thread         scanThread;
+
+    // Pending results (written by background thread, read by main thread under mutex)
+    std::vector<ProcessInfo> pendingProcesses;
+    std::string              pendingStatusMsg;
+    ImVec4                   pendingStatusColor;
+    bool                     pendingResultReady{false};
+
+    // Lambda: run the scan on a background thread
     auto do_scan = [&]() {
+        if (scanning.load()) return;
+
         std::string target(pathBuf);
         if (target.empty()) {
             statusMsg   = "Please enter or browse for a path first.";
             statusColor = ImVec4(1.0f, 0.8f, 0.3f, 1.0f);
             return;
         }
-        auto files = collect_files(target);
-        if (files.empty()) {
-            processes.clear();
-            statusMsg   = "No files found at the given path.";
-            statusColor = ImVec4(1.0f, 0.8f, 0.3f, 1.0f);
-            return;
-        }
-        processes = find_locking_processes(files);
-        if (processes.empty()) {
-            statusMsg   = "No processes are locking the target.";
-            statusColor = ImVec4(0.3f, 0.9f, 0.4f, 1.0f);  // green
-        } else {
-            char buf[128];
-            std::snprintf(buf, sizeof(buf), "Found %d process(es) locking the target.",
-                          (int)processes.size());
-            statusMsg   = buf;
-            statusColor = ImVec4(1.0f, 0.45f, 0.35f, 1.0f); // red
-        }
+
+        // Join any previous thread before starting a new one
+        if (scanThread.joinable()) scanThread.join();
+
+        scanning.store(true);
+        filesCollected.store(0);
+        scanPhase.store(1);
+        statusMsg   = "Scanning...";
+        statusColor = ImVec4(0.45f, 0.72f, 0.96f, 1.0f);
+
+        scanThread = std::thread([&, target]() {
+            // Phase 1: collect files
+            auto files = collect_files(target, [&](size_t n) {
+                filesCollected.store(n);
+                if (n % 100 == 0) glfwPostEmptyEvent();
+            });
+
+            // Phase 2: find locking processes
+            scanPhase.store(2);
+            glfwPostEmptyEvent();
+
+            std::vector<ProcessInfo> procs;
+            std::string msg;
+            ImVec4 color;
+
+            if (files.empty()) {
+                msg   = "No files found at the given path.";
+                color = ImVec4(1.0f, 0.8f, 0.3f, 1.0f);
+            } else {
+                procs = find_locking_processes(files);
+                if (procs.empty()) {
+                    msg   = "No processes are locking the target.";
+                    color = ImVec4(0.3f, 0.9f, 0.4f, 1.0f);
+                } else {
+                    char buf[128];
+                    std::snprintf(buf, sizeof(buf), "Found %d process(es) locking the target.",
+                                  (int)procs.size());
+                    msg   = buf;
+                    color = ImVec4(1.0f, 0.45f, 0.35f, 1.0f);
+                }
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(resultMutex);
+                pendingProcesses   = std::move(procs);
+                pendingStatusMsg   = std::move(msg);
+                pendingStatusColor = color;
+                pendingResultReady = true;
+            }
+
+            scanPhase.store(0);
+            scanning.store(false);
+            glfwPostEmptyEvent();
+        });
     };
 
     // --- Main loop ---
@@ -174,6 +227,17 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int)
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        // Pick up completed scan results
+        if (!scanning.load()) {
+            std::lock_guard<std::mutex> lock(resultMutex);
+            if (pendingResultReady) {
+                processes   = std::move(pendingProcesses);
+                statusMsg   = std::move(pendingStatusMsg);
+                statusColor = pendingStatusColor;
+                pendingResultReady = false;
+            }
+        }
 
         // Auto-scan on first frame if path was provided via command line
         if (!autoScanned && pathBuf[0] != '\0') {
@@ -205,6 +269,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int)
         ImGui::Spacing();
 
         // ── Path input row ───────────────────────────────────────────────
+        bool isBusy = scanning.load();
+        ImGui::BeginDisabled(isBusy);
         ImGui::Text("Target:");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 280);
@@ -230,11 +296,31 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int)
         if (ImGui::Button("Scan", ImVec2(80, 0)) || enterPressed) {
             do_scan();
         }
+        ImGui::EndDisabled();
 
         ImGui::Spacing();
 
-        // ── Status bar ───────────────────────────────────────────────────
-        if (!statusMsg.empty()) {
+        // ── Status bar / Progress ────────────────────────────────────────
+        if (isBusy) {
+            int phase = scanPhase.load();
+            size_t count = filesCollected.load();
+
+            float fraction = -1.0f * (float)ImGui::GetTime();
+            ImGui::ProgressBar(fraction, ImVec2(-FLT_MIN, 0), "");
+
+            if (phase == 1) {
+                char buf[128];
+                std::snprintf(buf, sizeof(buf), "Collecting files... (%zu found)", count);
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.72f, 0.96f, 1.0f));
+                ImGui::TextUnformatted(buf);
+                ImGui::PopStyleColor();
+            } else if (phase == 2) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.72f, 0.96f, 1.0f));
+                ImGui::TextUnformatted("Analyzing locks...");
+                ImGui::PopStyleColor();
+            }
+            ImGui::Spacing();
+        } else if (!statusMsg.empty()) {
             ImGui::PushStyleColor(ImGuiCol_Text, statusColor);
             ImGui::TextWrapped("%s", statusMsg.c_str());
             ImGui::PopStyleColor();
@@ -293,13 +379,15 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int)
 
                     ImGui::TableSetColumnIndex(7);
                     ImGui::PushID(i);
+                    ImGui::BeginDisabled(isBusy);
                     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.75f, 0.22f, 0.17f, 1.0f));
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.30f, 0.25f, 1.0f));
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.65f, 0.15f, 0.12f, 1.0f));
                     if (ImGui::SmallButton("Kill")) {
-                        open_kill_popup(p.pid, p.name);
+                        request_kill(p.pid, p.name);
                     }
                     ImGui::PopStyleColor(3);
+                    ImGui::EndDisabled();
                     ImGui::PopID();
                 }
                 ImGui::EndTable();
@@ -308,11 +396,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int)
             // ── Bottom button row ────────────────────────────────────────
             ImGui::Spacing();
 
+            ImGui::BeginDisabled(isBusy);
             ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.75f, 0.22f, 0.17f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.30f, 0.25f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.65f, 0.15f, 0.12f, 1.0f));
             if (ImGui::Button("Kill All", ImVec2(100, 0))) {
-                open_kill_all_popup();
+                request_kill_all();
             }
             ImGui::PopStyleColor(3);
 
@@ -320,9 +409,15 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int)
             if (ImGui::Button("Refresh", ImVec2(100, 0))) {
                 do_scan();
             }
+            ImGui::EndDisabled();
         }
 
         // ── Confirm Kill popup ───────────────────────────────────────────
+        if (g_killReq.pending) {
+            ImGui::OpenPopup("Confirm Kill");
+            g_killReq.pending = false;
+        }
+
         ImVec2 center = ImGui::GetMainViewport()->GetCenter();
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
 
@@ -389,6 +484,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int)
     }
 
     // ── Cleanup ──────────────────────────────────────────────────────────
+    if (scanThread.joinable()) scanThread.join();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();

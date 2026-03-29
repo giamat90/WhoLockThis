@@ -5,7 +5,7 @@
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
-!include "WordFunc.nsh"
+!include "EnVar.nsh"
 
 ; ---------------------------------------------------------------------------
 ;  General
@@ -85,14 +85,8 @@ Section "WhoLockThis (required)" SecMain
     WriteRegStr HKCR "Directory\Background\shell\WhoLockThis\command" "" '"$INSTDIR\wholock.exe" "%V"'
 
     ; --- Add to system PATH ---
-    ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-    Push $0
-    Push "$INSTDIR"
-    Call StrStr
-    Pop $1
-    StrCmp $1 "" 0 skip_path
-        WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$0;$INSTDIR"
-    skip_path:
+    EnVar::SetHKLM
+    EnVar::AddValue "Path" "$INSTDIR"
 
     ; Notify the system that environment variables changed
     SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
@@ -154,12 +148,8 @@ Section "Uninstall"
     DeleteRegKey HKCR "Directory\Background\shell\WhoLockThis"
 
     ; --- Remove from system PATH ---
-    ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-    ; Try all possible patterns: ";INSTDIR" at end, "INSTDIR;" at start/middle, or alone
-    ${WordReplace} $0 ";$INSTDIR" "" "+" $1
-    ${WordReplace} $1 "$INSTDIR;" "" "+" $1
-    ${WordReplace} $1 "$INSTDIR" "" "+" $1
-    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$1"
+    EnVar::SetHKLM
+    EnVar::DeleteValue "Path" "$INSTDIR"
     SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
     ; --- Remove registry keys ---
@@ -171,34 +161,3 @@ Section "Uninstall"
     RMDir "$SMPROGRAMS\WhoLockThis"
 SectionEnd
 
-; ---------------------------------------------------------------------------
-;  Helper: StrStr - find substring in string
-;  Used by installer to check if INSTDIR is already in PATH
-; ---------------------------------------------------------------------------
-Function StrStr
-    Exch $R1 ; substring
-    Exch
-    Exch $R2 ; string
-    Push $R3
-    Push $R4
-    Push $R5
-    StrLen $R3 $R1
-    StrCpy $R4 0
-    loop:
-        StrCpy $R5 $R2 $R3 $R4
-        StrCmp $R5 $R1 found
-        StrCmp $R5 "" notfound
-        IntOp $R4 $R4 + 1
-        Goto loop
-    found:
-        StrCpy $R1 $R2 "" $R4
-        Goto done
-    notfound:
-        StrCpy $R1 ""
-    done:
-    Pop $R5
-    Pop $R4
-    Pop $R3
-    Pop $R2
-    Exch $R1
-FunctionEnd

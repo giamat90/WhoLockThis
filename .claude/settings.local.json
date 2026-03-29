@@ -9,7 +9,21 @@
       "Bash(./build/wholock.exe 2>&1)",
       "Read(//c/Program Files \\(x86\\)/NSIS/**)",
       "Read(//c/Program Files/NSIS/**)",
-      "Bash(\"/c/Program Files \\(x86\\)/NSIS/makensis.exe\" installer.nsi 2>&1)"
+      "Bash(\"/c/Program Files \\(x86\\)/NSIS/makensis.exe\" installer.nsi 2>&1)",
+      "Bash(find C:WorkspaceGiaMat90WhoLockThis -type f \\\\\\(-name *.iss -o -name *.wixproj -o -name *.vdproj -o -name *.msi -o -name setup.* -o -name install.* \\\\\\))",
+      "Bash(grep -E \"\\\\.\\(cpp|h|csproj|xaml|sln\\)$\")",
+      "Bash(find C:WorkspaceGiaMat90WhoLockThis -maxdepth 2 -type f \\\\\\(-name *.md -o -name *.txt -o -name *.rst -o -name Makefile \\\\\\))",
+      "Bash(git:*)",
+      "Bash(ls /c/Workspace/GiaMat90/WhoLockThis/build/_deps/imgui-src/*.h)",
+      "Bash(where makensis:*)",
+      "Bash(ls \"/c/Program Files \\(x86\\)/NSIS\")",
+      "Bash(ls:*)",
+      "Bash(curl:*)",
+      "Bash(unzip:*)",
+      "Bash(powershell -Command \"Copy-Item 'C:\\\\tmp\\\\envar_extract\\\\Plugins\\\\x86-unicode\\\\EnVar.dll' 'C:\\\\Program Files \\(x86\\)\\\\NSIS\\\\Plugins\\\\x86-unicode\\\\EnVar.dll' -Force\" 2>&1)",
+      "Bash(cygpath:*)",
+      "Bash(powershell -Command \"Copy-Item 'C:\\\\Users\\\\giaco\\\\AppData\\\\Local\\\\Temp\\\\envar_extract\\\\Plugins\\\\x86-unicode\\\\EnVar.dll' 'C:\\\\Program Files \\(x86\\)\\\\NSIS\\\\Plugins\\\\x86-unicode\\\\EnVar.dll' -Force\" 2>&1)",
+      "Bash(powershell -Command \"Test-Path 'C:\\\\Program Files \\(x86\\)\\\\NSIS\\\\Plugins\\\\x86-unicode\\\\EnVar.dll'\" 2>&1)"
     ]
   }
 }

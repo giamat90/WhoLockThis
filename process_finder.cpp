@@ -138,7 +138,8 @@ static std::string rm_app_type_str(UINT type)
 
 // ── public API ───────────────────────────────────────────────────────────────
 
-std::vector<std::wstring> collect_files(const std::string& path)
+std::vector<std::wstring> collect_files(const std::string& path,
+                                        std::function<void(size_t)> progress)
 {
     std::vector<std::wstring> files;
     fs::path p(path);
@@ -146,15 +147,22 @@ std::vector<std::wstring> collect_files(const std::string& path)
 
     if (fs::is_regular_file(p, ec)) {
         files.push_back(fs::canonical(p).wstring());
+        if (progress) progress(files.size());
     } else if (fs::is_directory(p, ec)) {
         for (auto& entry : fs::recursive_directory_iterator(
                  p, fs::directory_options::skip_permission_denied, ec)) {
             if (entry.is_regular_file(ec)) {
                 files.push_back(entry.path().wstring());
+                if (progress) progress(files.size());
             }
         }
     }
     return files;
+}
+
+std::vector<std::wstring> collect_files(const std::string& path)
+{
+    return collect_files(path, nullptr);
 }
 
 std::vector<ProcessInfo> find_locking_processes(const std::vector<std::wstring>& files)
