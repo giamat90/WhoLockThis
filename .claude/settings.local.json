@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake:*)",
+      "Read(//c/mingw32/i686-w64-mingw32/include/**)",
+      "Read(//c/mingw32/include/**)",
+      "Bash(./build/process_manager.exe 2>&1)",
+      "Bash(./build/process_manager.exe \"C:/Workspace/GiaMat90/process_manager/main.cpp\" 2>&1)",
+      "Bash(./build/wholock.exe 2>&1)",
+      "Read(//c/Program Files \\(x86\\)/NSIS/**)",
+      "Read(//c/Program Files/NSIS/**)",
+      "Bash(\"/c/Program Files \\(x86\\)/NSIS/makensis.exe\" installer.nsi 2>&1)"
+    ]
+  }
+}
