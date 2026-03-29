@@ -5,7 +5,7 @@
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
-!include "EnVar.nsh"
+!include "WinMessages.nsh"
 
 ; ---------------------------------------------------------------------------
 ;  General
@@ -62,7 +62,7 @@ Section "WhoLockThis (required)" SecMain
 
     ; --- Copy files ---
     SetOutPath "$INSTDIR"
-    File "build\wholock.exe"
+    File "build\Debug\wholockthis.exe"
     File "README.md"
     File "LICENSE"
 
@@ -71,24 +71,21 @@ Section "WhoLockThis (required)" SecMain
 
     ; --- Context menu: right-click on a FILE ---
     WriteRegStr HKCR "*\shell\WhoLockThis" "" "WhoLockThis - Who's locking this?"
-    WriteRegStr HKCR "*\shell\WhoLockThis" "Icon" "$INSTDIR\wholock.exe,0"
-    WriteRegStr HKCR "*\shell\WhoLockThis\command" "" '"$INSTDIR\wholock.exe" "%1"'
+    WriteRegStr HKCR "*\shell\WhoLockThis" "Icon" "$INSTDIR\wholockthis.exe,0"
+    WriteRegStr HKCR "*\shell\WhoLockThis\command" "" '"$INSTDIR\wholockthis.exe" "%1"'
 
     ; --- Context menu: right-click on a FOLDER ---
     WriteRegStr HKCR "Directory\shell\WhoLockThis" "" "WhoLockThis - Who's locking this?"
-    WriteRegStr HKCR "Directory\shell\WhoLockThis" "Icon" "$INSTDIR\wholock.exe,0"
-    WriteRegStr HKCR "Directory\shell\WhoLockThis\command" "" '"$INSTDIR\wholock.exe" "%1"'
+    WriteRegStr HKCR "Directory\shell\WhoLockThis" "Icon" "$INSTDIR\wholockthis.exe,0"
+    WriteRegStr HKCR "Directory\shell\WhoLockThis\command" "" '"$INSTDIR\wholockthis.exe" "%1"'
 
     ; --- Context menu: right-click on folder BACKGROUND ---
     WriteRegStr HKCR "Directory\Background\shell\WhoLockThis" "" "WhoLockThis - Who's locking this?"
-    WriteRegStr HKCR "Directory\Background\shell\WhoLockThis" "Icon" "$INSTDIR\wholock.exe,0"
-    WriteRegStr HKCR "Directory\Background\shell\WhoLockThis\command" "" '"$INSTDIR\wholock.exe" "%V"'
+    WriteRegStr HKCR "Directory\Background\shell\WhoLockThis" "Icon" "$INSTDIR\wholockthis.exe,0"
+    WriteRegStr HKCR "Directory\Background\shell\WhoLockThis\command" "" '"$INSTDIR\wholockthis.exe" "%V"'
 
-    ; --- Add to system PATH ---
-    EnVar::SetHKLM
-    EnVar::AddValue "Path" "$INSTDIR"
-
-    ; Notify the system that environment variables changed
+    ; --- Add to system PATH (via PowerShell to safely handle REG_EXPAND_SZ) ---
+    nsExec::ExecToLog `powershell -NoProfile -Command "& { $$p = [Environment]::GetEnvironmentVariable('Path','Machine'); if ($$p -split ';' -notcontains '$INSTDIR') { [Environment]::SetEnvironmentVariable('Path', $$p + ';$INSTDIR', 'Machine') } }"`
     SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
     ; --- Add/Remove Programs entry ---
@@ -107,7 +104,7 @@ Section "WhoLockThis (required)" SecMain
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WhoLockThis" \
         "InstallLocation" "$INSTDIR"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WhoLockThis" \
-        "DisplayIcon" "$INSTDIR\wholock.exe,0"
+        "DisplayIcon" "$INSTDIR\wholockthis.exe,0"
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WhoLockThis" \
         "NoModify" 1
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WhoLockThis" \
@@ -136,7 +133,7 @@ SectionEnd
 ; ---------------------------------------------------------------------------
 Section "Uninstall"
     ; --- Remove files ---
-    Delete "$INSTDIR\wholock.exe"
+    Delete "$INSTDIR\wholockthis.exe"
     Delete "$INSTDIR\README.md"
     Delete "$INSTDIR\LICENSE"
     Delete "$INSTDIR\uninstall.exe"
@@ -147,9 +144,8 @@ Section "Uninstall"
     DeleteRegKey HKCR "Directory\shell\WhoLockThis"
     DeleteRegKey HKCR "Directory\Background\shell\WhoLockThis"
 
-    ; --- Remove from system PATH ---
-    EnVar::SetHKLM
-    EnVar::DeleteValue "Path" "$INSTDIR"
+    ; --- Remove from system PATH (via PowerShell to safely handle REG_EXPAND_SZ) ---
+    nsExec::ExecToLog `powershell -NoProfile -Command "& { $$p = [Environment]::GetEnvironmentVariable('Path','Machine'); $$entries = $$p -split ';' | Where-Object { $$_ -ne '$INSTDIR' }; [Environment]::SetEnvironmentVariable('Path', ($$entries -join ';'),'Machine') }"`
     SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
     ; --- Remove registry keys ---
@@ -160,4 +156,3 @@ Section "Uninstall"
     Delete "$SMPROGRAMS\WhoLockThis\Uninstall WhoLockThis.lnk"
     RMDir "$SMPROGRAMS\WhoLockThis"
 SectionEnd
-
