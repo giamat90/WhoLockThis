@@ -11,7 +11,7 @@
 ;  General
 ; ---------------------------------------------------------------------------
 Name "WhoLockThis"
-OutFile "WhoLock_Setup.exe"
+OutFile "WhoLockThisSetup.exe"
 InstallDir "$PROGRAMFILES\WhoLockThis"
 InstallDirRegKey HKLM "Software\WhoLockThis" "InstallDir"
 RequestExecutionLevel admin
